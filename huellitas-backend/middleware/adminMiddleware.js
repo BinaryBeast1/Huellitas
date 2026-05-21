@@ -1,0 +1,16 @@
+const User = require('../models/User');
+
+const admin = async (req, res, next) => {
+    try {
+        const usuario = await User.findById(req.usuario.id);
+        if (!usuario || usuario.rol !== 'admin') {
+            return res.status(403).json({ mensaje: 'Acceso solo para administradores' });
+        }
+        req.usuario.rol = usuario.rol;
+        next();
+    } catch (error) {
+        res.status(500).json({ mensaje: 'Error de autorización' });
+    }
+};
+
+module.exports = admin;
