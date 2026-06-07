@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup, Circle, useMap, useMapEvents } 
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
 import { API } from '../config';
+import { compartirWhatsApp } from '../utils/share';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet.markercluster/dist/MarkerCluster.css';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
@@ -245,6 +246,7 @@ export default function MapaReportes({
                   <p style={{ fontSize: 13 }}>{m.descripcion?.slice(0, 80)}…</p>
                   <small>📍 {m.ubicacionNombre}</small>
                   <div className="popup-actions">
+                    <button type="button" className="btn btn-sm btn-wa" onClick={() => compartirWhatsApp(m)}>📤 WhatsApp</button>
                     <button type="button" className="btn btn-sm btn-secondary" onClick={() => onDetalle(m)}>Ver ficha</button>
                     {modoInvitado && (
                       <button type="button" className="btn btn-sm btn-primary" onClick={() => onContactar(m)}>Iniciar sesión</button>

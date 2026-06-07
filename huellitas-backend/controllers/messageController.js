@@ -1,5 +1,6 @@
 const Message = require('../models/Message');
 const Pet = require('../models/Pet');
+const { crearNotificacion } = require('../utils/notificaciones');
 
 const enviarMensaje = async (req, res) => {
     try {
@@ -22,6 +23,14 @@ const enviarMensaje = async (req, res) => {
         const poblado = await Message.findById(mensaje._id)
             .populate('de', 'nombre verificado')
             .populate('para', 'nombre');
+
+        const remitente = poblado.de?.nombre || 'Alguien';
+        await crearNotificacion(
+            reporte.creador,
+            `💬 ${remitente} te escribió sobre ${reporte.nombre}`,
+            'message',
+            { referencia: mensaje._id, referenciaTipo: 'message' }
+        );
 
         res.status(201).json({ mensaje: 'Mensaje enviado de forma segura', data: poblado });
     } catch (error) {

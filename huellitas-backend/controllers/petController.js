@@ -2,6 +2,8 @@ const Pet = require('../models/Pet');
 const User = require('../models/User');
 const Denuncia = require('../models/Denuncia');
 const { distanciaKm } = require('../utils/geo');
+const { crearNotificacion } = require('../utils/notificaciones');
+const { sanitizarReportePublico } = require('../utils/privacidad');
 
 const agregarHistorial = (pet, evento, detalle) => {
     pet.historial.push({ evento, detalle, fecha: new Date() });
@@ -11,7 +13,7 @@ const agregarMascota = async (req, res) => {
     try {
         const {
             nombre, especie, raza, color, descripcion,
-            latitud, longitud, ubicacionNombre, tipoReporte, recompensa
+            latitud, longitud, ubicacionNombre, tipoReporte, recompensa, reportePerdida
         } = req.body;
 
         const esPerdida = (tipoReporte || 'perdida') === 'perdida';
@@ -29,6 +31,7 @@ const agregarMascota = async (req, res) => {
             estado: 'extraviado',
             tipoReporte: tipoReporte || 'perdida',
             recompensa: recompensa ? Number(recompensa) : undefined,
+            reportePerdida: (tipoReporte === 'avistamiento' && reportePerdida) ? reportePerdida : undefined,
             historial: [{
                 evento: esPerdida ? 'Reporte de pérdida' : 'Avistamiento registrado',
                 detalle: `Publicado en ${ubicacionNombre || 'mapa'}`
@@ -38,6 +41,27 @@ const agregarMascota = async (req, res) => {
         const mascotaGuardada = await nuevaMascota.save();
         const reporteCompleto = await Pet.findById(mascotaGuardada._id)
             .populate('creador', 'nombre email telefono verificado mostrarContacto');
+
+        if (latitud != null && longitud != null) {
+            const usuariosAlerta = await User.find({
+                _id: { $ne: req.usuario.id },
+                alertLat: { $exists: true, $ne: null },
+                alertLng: { $exists: true, $ne: null }
+            });
+            const tipoLabel = esPerdida ? 'pérdida' : 'avistamiento';
+            for (const u of usuariosAlerta) {
+                const km = distanciaKm(Number(latitud), Number(longitud), u.alertLat, u.alertLng);
+                const radio = u.alertRadiusKm || 5;
+                if (km <= radio) {
+                    await crearNotificacion(
+                        u._id,
+                        `🔔 Nuevo reporte de ${tipoLabel} a ${Math.round(km * 10) / 10} km: ${nombre}`,
+                        'alert',
+                        { referencia: mascotaGuardada._id, referenciaTipo: 'pet' }
+                    );
+                }
+            }
+        }
 
         res.status(201).json({
             mensaje: 'Reporte creado exitosamente',
@@ -51,7 +75,7 @@ const agregarMascota = async (req, res) => {
 
 const obtenerMascotas = async (req, res) => {
     try {
-        const { q, ubicacion, estado, tipo } = req.query;
+        const { q, ubicacion, estado, tipo, lat, lng, radioKm } = req.query;
         const filtro = { oculto: false };
 
         if (q) {
@@ -64,9 +88,24 @@ const obtenerMascotas = async (req, res) => {
         if (estado) filtro.estado = estado;
         if (tipo) filtro.tipoReporte = tipo;
 
-        const reportes = await Pet.find(filtro)
-            .populate('creador', 'nombre verificado mostrarContacto')
+        let reportes = await Pet.find(filtro)
+            .populate('creador', 'nombre verificado mostrarContacto telefono')
+            .populate('reportePerdida', 'nombre especie estado fotoUrl')
             .sort({ destacado: -1, fechaExtravio: -1 });
+
+        const latN = lat != null && lat !== '' ? Number(lat) : null;
+        const lngN = lng != null && lng !== '' ? Number(lng) : null;
+        const radio = radioKm != null && radioKm !== '' ? Number(radioKm) : null;
+        if (latN != null && lngN != null && radio != null && !Number.isNaN(latN) && !Number.isNaN(lngN) && radio > 0) {
+            reportes = reportes
+                .map((r) => {
+                    if (r.latitud == null || r.longitud == null) return null;
+                    const km = distanciaKm(latN, lngN, r.latitud, r.longitud);
+                    return km <= radio ? { ...r.toObject(), distanciaKm: Math.round(km * 10) / 10 } : null;
+                })
+                .filter(Boolean)
+                .sort((a, b) => (a.distanciaKm ?? 0) - (b.distanciaKm ?? 0));
+        }
 
         res.json(reportes);
     } catch (error) {
@@ -77,13 +116,43 @@ const obtenerMascotas = async (req, res) => {
 const obtenerMascota = async (req, res) => {
     try {
         const reporte = await Pet.findById(req.params.id)
-            .populate('creador', 'nombre email telefono verificado mostrarContacto');
+            .populate('creador', 'nombre email telefono verificado mostrarContacto')
+            .populate('reportePerdida', 'nombre especie estado fotoUrl ubicacionNombre');
         if (!reporte || reporte.oculto) {
             return res.status(404).json({ mensaje: 'Reporte no encontrado' });
         }
         res.json(reporte);
     } catch (error) {
         res.status(500).json({ mensaje: 'Error al obtener reporte' });
+    }
+};
+
+const obtenerCasoPublico = async (req, res) => {
+    try {
+        const reporte = await Pet.findById(req.params.id)
+            .populate('creador', 'nombre verificado')
+            .populate('reportePerdida', 'nombre especie estado');
+        if (!reporte || reporte.oculto) {
+            return res.status(404).json({ mensaje: 'Reporte no encontrado' });
+        }
+        let avistamientos = [];
+        if (reporte.tipoReporte === 'perdida') {
+            const lista = await Pet.find({
+                reportePerdida: reporte._id,
+                oculto: false,
+                tipoReporte: 'avistamiento'
+            })
+                .populate('creador', 'nombre verificado')
+                .sort({ fechaExtravio: -1 })
+                .limit(30);
+            avistamientos = lista.map(sanitizarReportePublico);
+        }
+        res.json({
+            reporte: sanitizarReportePublico(reporte),
+            avistamientos
+        });
+    } catch (error) {
+        res.status(500).json({ mensaje: 'Error al obtener caso' });
     }
 };
 
@@ -209,7 +278,7 @@ const obtenerMascotasPublicas = async (req, res) => {
             .populate('creador', 'nombre verificado')
             .sort({ destacado: -1, fechaExtravio: -1 })
             .limit(80);
-        res.json(reportes);
+        res.json(reportes.map(sanitizarReportePublico));
     } catch (error) {
         res.status(500).json({ mensaje: 'Error al obtener reportes públicos' });
     }
@@ -218,13 +287,82 @@ const obtenerMascotasPublicas = async (req, res) => {
 const obtenerMascotaPublica = async (req, res) => {
     try {
         const reporte = await Pet.findById(req.params.id)
-            .populate('creador', 'nombre verificado');
+            .populate('creador', 'nombre verificado')
+            .populate('reportePerdida', 'nombre especie estado');
         if (!reporte || reporte.oculto) {
             return res.status(404).json({ mensaje: 'Reporte no encontrado' });
         }
-        res.json(reporte);
+        res.json(sanitizarReportePublico(reporte));
     } catch (error) {
         res.status(500).json({ mensaje: 'Error al obtener reporte' });
+    }
+};
+
+const obtenerCaso = async (req, res) => {
+    try {
+        const reporte = await Pet.findById(req.params.id)
+            .populate('creador', 'nombre email telefono verificado mostrarContacto')
+            .populate('reportePerdida', 'nombre especie estado fotoUrl ubicacionNombre');
+        if (!reporte || reporte.oculto) {
+            return res.status(404).json({ mensaje: 'Reporte no encontrado' });
+        }
+
+        let avistamientos = [];
+        if (reporte.tipoReporte === 'perdida') {
+            avistamientos = await Pet.find({
+                reportePerdida: reporte._id,
+                oculto: false,
+                tipoReporte: 'avistamiento'
+            })
+                .populate('creador', 'nombre verificado')
+                .sort({ fechaExtravio: -1 })
+                .limit(30);
+        }
+
+        res.json({ reporte, avistamientos });
+    } catch (error) {
+        res.status(500).json({ mensaje: 'Error al obtener caso' });
+    }
+};
+
+const vincularAvistamiento = async (req, res) => {
+    try {
+        const { reportePerdidaId } = req.body;
+        const avistamiento = await Pet.findById(req.params.id);
+        if (!avistamiento) return res.status(404).json({ mensaje: 'Reporte no encontrado' });
+        if (avistamiento.tipoReporte !== 'avistamiento') {
+            return res.status(400).json({ mensaje: 'Solo avistamientos pueden vincularse a un reporte de pérdida' });
+        }
+
+        const perdida = await Pet.findById(reportePerdidaId);
+        if (!perdida || perdida.tipoReporte !== 'perdida') {
+            return res.status(400).json({ mensaje: 'Reporte de pérdida no válido' });
+        }
+
+        const esCreadorAvist = avistamiento.creador.toString() === req.usuario.id;
+        const esDuenoPerdida = perdida.creador.toString() === req.usuario.id;
+        if (!esCreadorAvist && !esDuenoPerdida) {
+            return res.status(401).json({ mensaje: 'No autorizado' });
+        }
+
+        avistamiento.reportePerdida = perdida._id;
+        agregarHistorial(avistamiento, 'Vinculado a reporte de pérdida', `Caso: ${perdida.nombre}`);
+        await avistamiento.save();
+
+        await crearNotificacion(
+            perdida.creador,
+            `👀 Nuevo avistamiento vinculado a ${perdida.nombre}`,
+            'alert',
+            { referencia: avistamiento._id, referenciaTipo: 'pet' }
+        );
+
+        const actualizado = await Pet.findById(avistamiento._id)
+            .populate('creador', 'nombre email telefono verificado mostrarContacto')
+            .populate('reportePerdida', 'nombre especie estado fotoUrl');
+
+        res.json({ mensaje: 'Avistamiento vinculado', reporte: actualizado });
+    } catch (error) {
+        res.status(500).json({ mensaje: 'Error al vincular' });
     }
 };
 
@@ -251,6 +389,8 @@ module.exports = {
     agregarMascota,
     obtenerMascotas,
     obtenerMascota,
+    obtenerCaso,
+    obtenerCasoPublico,
     obtenerSimilares,
     obtenerMascotasPublicas,
     obtenerMascotaPublica,
@@ -259,5 +399,6 @@ module.exports = {
     actualizarMascota,
     marcarEncontrado,
     denunciarReporte,
+    vincularAvistamiento,
     obtenerEstadisticas
 };

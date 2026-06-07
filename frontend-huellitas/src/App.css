@@ -87,6 +87,39 @@
   border: 2px solid rgba(26, 22, 37, 0.1);
 }
 
+.btn-wa,
+.btn-wa-dueno {
+  background: #25d366 !important;
+  color: #fff !important;
+  border: none;
+  font-weight: 600;
+}
+.btn-wa-dueno {
+  background: #128c7e !important;
+}
+.ficha-actions-wa {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ficha-wa-hint {
+  margin-top: -4px;
+  margin-bottom: 12px;
+}
+.ficha-vinculo {
+  background: var(--cream);
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  font-size: 0.9rem;
+}
+.ficha-qr-url {
+  display: block;
+  margin-top: 4px;
+  word-break: break-all;
+  opacity: 0.75;
+}
+
 .btn-teal {
   background: linear-gradient(135deg, var(--teal), var(--teal-dark));
   color: white;

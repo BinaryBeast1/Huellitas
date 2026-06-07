@@ -24,7 +24,12 @@ const petSchema = new mongoose.Schema({
     historial: { type: [historialSchema], default: [] },
     denunciasCount: { type: Number, default: 0 },
     oculto: { type: Boolean, default: false },
-    destacado: { type: Boolean, default: false }
+    destacado: { type: Boolean, default: false },
+    reportePerdida: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Pet',
+        default: null
+    }
 });
 
 module.exports = mongoose.model('Pet', petSchema);

@@ -70,8 +70,10 @@ const petRoutes = require('./routes/petRoutes'); // <-- NUEVO
 app.use('/api/pets', petRoutes);
 
 const messageRoutes = require('./routes/messageRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 app.use('/api/messages', messageRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/admin', adminRoutes);
 
 // ENCIENDE EL SERVIDOR

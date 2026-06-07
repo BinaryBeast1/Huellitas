@@ -1,7 +1,9 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { API, headersAuth } from './config';
 import { getToken, saveToken, clearToken, esSesionInvalida } from './api/auth';
 import { reportesCercanos as filtrarCercanos } from './utils/geo';
+import { geocodificarInverso } from './utils/geocode';
 import { useUbicacionUsuario } from './hooks/useUbicacionUsuario';
 import LandingPage from './components/LandingPage';
 import VistaInvitado from './components/VistaInvitado';
@@ -15,6 +17,8 @@ import PanelAdmin from './components/PanelAdmin';
 import './App.css';
 
 function App() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [reportes, setReportes] = useState([]);
   const [token, setToken] = useState(getToken());
   const [perfil, setPerfil] = useState(null);
@@ -35,10 +39,7 @@ function App() {
     nombre: '', email: '', telefono: '', password: '',
     mostrarContacto: false, alertLat: '', alertLng: '', alertRadiusKm: 5
   });
-  const [notificaciones, setNotificaciones] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('huellitas-notif') || '[]'); }
-    catch { return []; }
-  });
+  const [notificaciones, setNotificaciones] = useState([]);
   const [notifAbierta, setNotifAbierta] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [reporteSeleccionado, setReporteSeleccionado] = useState(null);
@@ -47,7 +48,6 @@ function App() {
   const [soloCercanos, setSoloCercanos] = useState(true);
   const [modoInvitado, setModoInvitado] = useState(false);
   const [cargandoDemo, setCargandoDemo] = useState(false);
-  const reportesPrevios = useRef([]);
   const notifRef = useRef(null);
 
   const {
@@ -67,15 +67,6 @@ function App() {
     return reportes;
   }, [miUbicacion, soloCercanos, feedCercano, reportes]);
 
-  const agregarNotif = useCallback((texto, tipo = 'info') => {
-    const item = { id: Date.now() + Math.random(), texto, tipo, fecha: new Date().toISOString(), leida: false };
-    setNotificaciones(prev => {
-      const next = [item, ...prev].slice(0, 40);
-      localStorage.setItem('huellitas-notif', JSON.stringify(next));
-      return next;
-    });
-  }, []);
-
   const mostrarToast = useCallback((mensaje, tipo = 'success') => {
     const id = Date.now();
     setToasts(t => [...t, { id, mensaje, tipo }]);
@@ -87,7 +78,7 @@ function App() {
     setToken(null);
     setReportes([]);
     setPerfil(null);
-    reportesPrevios.current = [];
+    setNotificaciones([]);
     setEditandoId(null);
     setPerfilModal(false);
     mostrarToast('Tu sesión expiró. Inicia sesión de nuevo.', 'error');
@@ -101,18 +92,37 @@ function App() {
     return false;
   }, [cerrarSesionPorToken]);
 
-  const verificarAlertasZona = useCallback((lista, user, ubicacion) => {
-    const lat = ubicacion?.lat ?? user?.alertLat;
-    const lng = ubicacion?.lng ?? user?.alertLng;
-    if (lat == null || lng == null) return;
-    const radio = user?.alertRadiusKm || radioCercania || 5;
-    const prevIds = new Set(reportesPrevios.current.map(r => r._id));
-    filtrarCercanos(lista, lat, lng, radio).forEach((r) => {
-      if (prevIds.has(r._id)) return;
-      agregarNotif(`🔔 Nuevo caso a ${r.distanciaKm} km: ${r.nombre}`, 'alert');
-    });
-    reportesPrevios.current = lista;
-  }, [agregarNotif, radioCercania]);
+  const cargarNotificaciones = useCallback(async () => {
+    const authToken = getToken();
+    if (!authToken) { setNotificaciones([]); return; }
+    try {
+      const r = await fetch(`${API}/api/notifications`, { headers: { 'x-auth-token': authToken } });
+      const data = await r.json().catch(() => []);
+      if (manejarRespuestaAuth(r, data)) return;
+      if (r.ok && Array.isArray(data)) {
+        setNotificaciones(data.map((n) => ({
+          id: n._id,
+          texto: n.texto,
+          tipo: n.tipo,
+          fecha: n.fecha,
+          leida: n.leida
+        })));
+      }
+    } catch (e) { console.error(e); }
+  }, [manejarRespuestaAuth]);
+
+  const agregarNotif = useCallback(async (texto, tipo = 'info') => {
+    const authToken = getToken();
+    if (!authToken) return;
+    try {
+      await fetch(`${API}/api/notifications`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-auth-token': authToken },
+        body: JSON.stringify({ texto, tipo })
+      });
+      await cargarNotificaciones();
+    } catch (e) { console.error(e); }
+  }, [cargarNotificaciones]);
 
   const obtenerDatos = useCallback(async () => {
     const authToken = getToken();
@@ -123,15 +133,19 @@ function App() {
       if (filtroUbicacion) params.set('ubicacion', filtroUbicacion);
       if (filtroEstado) params.set('estado', filtroEstado);
       if (filtroTipo) params.set('tipo', filtroTipo);
+      if (miUbicacion && soloCercanos) {
+        params.set('lat', String(miUbicacion.lat));
+        params.set('lng', String(miUbicacion.lng));
+        params.set('radioKm', String(radioCercania));
+      }
       const url = `${API}/api/pets${params.toString() ? '?' + params : ''}`;
       const respuesta = await fetch(url, { headers: { 'x-auth-token': authToken } });
       const datos = await respuesta.json();
       if (manejarRespuestaAuth(respuesta, datos)) return;
       const lista = respuesta.ok && Array.isArray(datos) ? datos : [];
       setReportes(lista);
-      if (perfil || miUbicacion) verificarAlertasZona(lista, perfil, miUbicacion);
     } catch (e) { console.error(e); }
-  }, [token, busqueda, filtroUbicacion, filtroEstado, filtroTipo, perfil, miUbicacion, verificarAlertasZona, manejarRespuestaAuth]);
+  }, [token, busqueda, filtroUbicacion, filtroEstado, filtroTipo, miUbicacion, soloCercanos, radioCercania, manejarRespuestaAuth]);
 
   const cargarPerfil = useCallback(async () => {
     const authToken = getToken();
@@ -161,12 +175,62 @@ function App() {
   useEffect(() => { if (token) cargarPerfil(); else setPerfil(null); }, [token, cargarPerfil]);
 
   useEffect(() => {
+    if (!token) return;
+    cargarNotificaciones();
+    const id = setInterval(cargarNotificaciones, 45000);
+    return () => clearInterval(id);
+  }, [token, cargarNotificaciones]);
+
+  useEffect(() => {
     const handler = (e) => {
       if (notifRef.current && !notifRef.current.contains(e.target)) setNotifAbierta(false);
     };
     document.addEventListener('click', handler);
     return () => document.removeEventListener('click', handler);
   }, []);
+
+  const abrirCasoPorId = useCallback(async (id) => {
+    if (!id) return;
+    try {
+      const authToken = getToken();
+      if (authToken) {
+        const r = await fetch(`${API}/api/pets/${id}`, { headers: { 'x-auth-token': authToken } });
+        if (r.ok) setDetalleModal(await r.json());
+      } else {
+        const r = await fetch(`${API}/api/pets/public/${id}`);
+        if (r.ok) {
+          setDetalleModal(await r.json());
+          setModoInvitado(true);
+        }
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    const match = location.pathname.match(/^\/caso\/([^/]+)/);
+    const legacy = new URLSearchParams(location.search).get('reporte');
+    const id = match?.[1] || legacy;
+    if (id) abrirCasoPorId(id);
+  }, [location.pathname, location.search, token, abrirCasoPorId]);
+
+  const cerrarDetalle = () => {
+    setDetalleModal(null);
+    if (location.pathname.startsWith('/caso/') || location.search.includes('reporte=')) {
+      navigate('/', { replace: true });
+    }
+  };
+
+  const marcarPuntoMapa = useCallback(async (lat, lng) => {
+    setNuevoReporte((r) => ({ ...r, latitud: lat, longitud: lng }));
+    mostrarToast('Buscando dirección…', 'info');
+    const nombre = await geocodificarInverso(lat, lng);
+    if (nombre) {
+      setNuevoReporte((r) => ({ ...r, latitud: lat, longitud: lng, ubicacionNombre: nombre }));
+      mostrarToast(`📍 ${nombre}`, 'success');
+    } else {
+      mostrarToast('Punto marcado en el mapa', 'success');
+    }
+  }, [mostrarToast]);
 
   const manejarLogin = async (e) => {
     e.preventDefault();
@@ -208,10 +272,9 @@ function App() {
     clearToken();
     setToken(null);
     setReportes([]);
-    reportesPrevios.current = [];
+    setNotificaciones([]);
     setEditandoId(null);
     setPerfilModal(false);
-    agregarNotif('Sesión cerrada', 'info');
     mostrarToast('Hasta pronto');
   };
 
@@ -297,6 +360,7 @@ function App() {
   };
 
   const abrirDetalle = async (m) => {
+    navigate(`/caso/${m._id}`);
     try {
       const r = await fetch(`${API}/api/pets/${m._id}`, { headers: { 'x-auth-token': getToken() } });
       if (r.ok) setDetalleModal(await r.json());
@@ -365,12 +429,16 @@ function App() {
   const noLeidas = notificaciones.filter(n => !n.leida).length;
   const esAdmin = perfil?.rol === 'admin';
 
-  const marcarNotifLeidas = () => {
-    setNotificaciones(prev => {
-      const next = prev.map(n => ({ ...n, leida: true }));
-      localStorage.setItem('huellitas-notif', JSON.stringify(next));
-      return next;
-    });
+  const marcarNotifLeidas = async () => {
+    const authToken = getToken();
+    if (!authToken) return;
+    setNotificaciones(prev => prev.map(n => ({ ...n, leida: true })));
+    try {
+      await fetch(`${API}/api/notifications/leer-todas`, {
+        method: 'PATCH',
+        headers: { 'x-auth-token': authToken }
+      });
+    } catch (e) { console.error(e); }
   };
 
   const usarUbicacionAlerta = () => {
@@ -556,10 +624,7 @@ function App() {
                 reporteSeleccionado={reporteSeleccionado}
                 ubicacionUsuario={miUbicacion}
                 radioKm={radioCercania}
-                onMapClick={(lat, lng) => {
-                  setNuevoReporte((r) => ({ ...r, latitud: lat, longitud: lng }));
-                  mostrarToast('Punto marcado en el mapa', 'success');
-                }}
+                onMapClick={marcarPuntoMapa}
                 puntoBorrador={vistaActiva === 'reportar' ? {
                   latitud: nuevoReporte.latitud,
                   longitud: nuevoReporte.longitud,
@@ -634,10 +699,12 @@ function App() {
         <ModalDetalle
           reporte={detalleModal}
           token={token}
-          onClose={() => setDetalleModal(null)}
-          onContactar={(r) => { setDetalleModal(null); setContactoModal(r); }}
+          publico={!token}
+          onClose={cerrarDetalle}
+          onContactar={(r) => { cerrarDetalle(); setContactoModal(r); }}
           onRequiereLogin={irALogin}
           mostrarToast={mostrarToast}
+          onReporteActualizado={(r) => { setDetalleModal(r); obtenerDatos(); }}
         />
       )}
       {perfilModal && token && (

@@ -17,15 +17,16 @@ export default function ModalPerfil({ perfilEdit, setPerfilEdit, onSubmit, onClo
               onChange={(e) => setPerfilEdit({ ...perfilEdit, email: e.target.value })} />
           </div>
           <div className="form-group">
-            <label>Teléfono</label>
-            <input type="tel" value={perfilEdit.telefono || ''}
+            <label>Teléfono (WhatsApp)</label>
+            <input type="tel" placeholder="Ej: 9 1234 5678" value={perfilEdit.telefono || ''}
               onChange={(e) => setPerfilEdit({ ...perfilEdit, telefono: e.target.value })} />
+            <p className="form-hint">Con código de Chile (+56). Activa la casilla de abajo para que otros te escriban por WhatsApp.</p>
           </div>
           <div className="form-group">
             <label className="checkbox-label">
               <input type="checkbox" checked={!!perfilEdit.mostrarContacto}
                 onChange={(e) => setPerfilEdit({ ...perfilEdit, mostrarContacto: e.target.checked })} />
-              Mostrar email/teléfono en contacto directo
+              Permitir que me contacten por WhatsApp y email
             </label>
           </div>
           <div className="form-group">

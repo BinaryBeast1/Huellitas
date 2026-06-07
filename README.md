@@ -14,7 +14,10 @@ Todas las historias del backlog siguen activas: mapa, reportar (ubicación, desc
 - Matching de reportes similares + timeline del caso
 - Alertas por zona (HU18) en perfil
 - Mapa con clusters y marcadores distintos
-- Compartir WhatsApp + QR + copiar enlace
+- Compartir WhatsApp (difusión + chat directo al dueño con teléfono) + QR + copiar enlace `/caso/:id`
+- Vincular avistamientos a reportes de pérdida
+- Geocodificación al marcar en mapa
+- Chat con actualización automática
 - Denuncias y moderación automática
 - Panel admin (verificar usuarios, ocultar/destacar reportes)
 - PWA instalable

@@ -6,7 +6,7 @@ const DEMO_EMAIL = process.env.DEMO_EMAIL || 'demo@huellitas.cl';
 const DEMO_PASSWORD = process.env.DEMO_PASSWORD || 'demo2026';
 
 const USUARIOS = [
-  { nombre: 'Demo Huellitas', email: DEMO_EMAIL, verificado: true },
+  { nombre: 'Demo Huellitas', email: DEMO_EMAIL, verificado: true, telefono: '912345678', mostrarContacto: true },
   { nombre: 'María Providencia', email: 'maria@huellitas.cl', verificado: true },
   { nombre: 'Carlos Ñuñoa', email: 'carlos@huellitas.cl', verificado: false },
 ];
@@ -119,6 +119,8 @@ async function seedDemoData() {
     } else {
       user.nombre = u.nombre;
       user.verificado = u.verificado;
+      if (u.telefono) user.telefono = u.telefono;
+      if (u.mostrarContacto != null) user.mostrarContacto = u.mostrarContacto;
       if (u.email === DEMO_EMAIL) user.password = hash;
       await user.save();
     }
